@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Chatbot</title>
+    <style>
+        
+        @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #fafafa;
+            color: #333;
+            line-height: 1.45;
+            height: 100vh;
+            overflow: hidden;
+            width: 100%;
+        }
+        
+        .container {
+            width: 100%;
+            height: 100vh;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 28% 72%;
+            gap: 20px;
+            overflow: hidden;
+        }
+        
+        .sidebar {
+            background: linear-gradient(135deg, #e6f7ff 0%, #f0f7ff 100%);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 40px);
+            overflow-y: auto;
+            width: 100%;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .logo-icon {
+            width: 30px;
+            height: 30px;
+            background-color: #0071e3;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 10px;
+        }
+        
+        .logo-icon svg {
+            width: 20px;
+            height: 20px;
+            fill: white;
+        }
+        
+        .logo h1 {
+            font-size: 20px;
+            font-weight: 500;
+            color: #1d1d1f;
+        }
+        
+        .description {
+            color: #555;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 20px;
+        }
+        
+        .info-card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.03);
+            margin-bottom: 12px;
+        }
+        
+        .info-card h3 {
+            font-size: 15px;
+            color: #0071e3;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .info-card p {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+        }
+        
+        .disclaimer {
+            font-size: 12px;
+            color: #888;
+            margin-top: auto;
+            padding-top: 16px;
+            border-top: 1px solid #e6e6e6;
+            line-height: 1.5;
+        }
+        
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            background-color: #fff;
+            height: calc(100vh - 40px);
+            width: 100%;
+        }
+        
+        .chat-header {
+            background-color: #f5f5f7;
+            padding: 14px 20px;
+            border-bottom: 1px solid #e6e6e6;
+            display: flex;
+            align-items: center;
+        }
+        
+        .chat-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: #1d1d1f;
+        }
+        
+        .chat-status {
+            font-size: 13px;
+            color: #66bb6a;
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+        }
+        
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            background-color: #66bb6a;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .chat-container {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: white;
+            position: relative;
+        }
+        
+        .messages-container {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .message {
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            max-width: 80%;
+            border-radius: 12px;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.03);
+            position: relative;
+        }
+        
+        .message::after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 0;
+            border: 6px solid transparent;
+            bottom: 10px;
+        }
+        
+        .bot-message {
+            background-color: #f9f9fc;
+            border: 1px solid #eeeef5;
+            align-self: flex-start;
+            color: #333;
+        }
+        
+        .bot-message::after {
+            border-right-color: #f9f9fc;
+            left: -12px;
+        }
+        
+        .user-message {
+            background-color: #f0f7ff;
+            border: 1px solid #e3f1ff;
+            align-self: flex-end;
+            color: #333;
+        }
+        
+        .user-message::after {
+            border-left-color: #f0f7ff;
+            right: -12px;
+        }
+        
+        .message-header {
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #888;
+            font-weight: 500;
+        }
+        
+        .message-content {
+            font-size: 14px;
+            line-height: 1.45;
+        }
+        
+        .loading-indicator {
+            display: none;
+            margin: 10px 0;
+            align-self: flex-start;
+            position: relative;
+            left: 0;
+        }
+        
+        .typing-dots {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            background-color: #f9f9fc;
+            border-radius: 16px;
+            border: 1px solid #eeeef5;
+        }
+        
+        .typing-dots span {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            background-color: #0071e3;
+            border-radius: 50%;
+            margin: 0 3px;
+            opacity: 0.6;
+            animation: typing 1.5s infinite;
+        }
+        
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes typing {
+            0%, 100% {
+                transform: translateY(0);
+                opacity: 0.6;
+            }
+            50% {
+                transform: translateY(-3px);
+                opacity: 1;
+            }
+        }
+        
+        .input-container {
+            padding: 16px 20px;
+            background-color: #f5f5f7;
+            border-top: 1px solid #e6e6e6;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        #message-input {
+            flex-grow: 1;
+            padding: 12px 15px;
+            border-radius: 16px;
+            border: 1px solid #e6e6e6;
+            background-color: #ffffff;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        #message-input:focus {
+            border-color: #0071e3;
+            box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.1);
+        }
+        
+        #send-button {
+            background-color: #0071e3;
+            color: #ffffff;
+            border: none;
+            border-radius: 16px;
+            padding: 12px 20px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            font-family: inherit;
+        }
+        
+        #send-button:hover {
+            background-color: #0062c4;
+        }
+        
+        /* Medical styling additions */
+        .medical-icon {
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        @media (max-width: 1200px) {
+            .container {
+                grid-template-columns: 30% 70%;
+            }
+        }
+        
+        @media (max-width: 992px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 15px;
+                height: auto;
+                overflow-y: auto;
+            }
+            
+            .sidebar {
+                margin-bottom: 15px;
+                height: auto;
+                max-height: 300px;
+            }
+            
+            .main-content {
+                height: calc(100vh - 350px);
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .message {
+                max-width: 90%;
+            }
+            
+            .input-container {
+                padding: 12px 15px;
+            }
+            
+            #message-input {
+                padding: 10px;
+            }
+            
+            #send-button {
+                padding: 10px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                        <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-7 14h-2v-2h2v2zm0-4h-2V7h2v6z" fill="white"/>
+                    </svg>
+                </div>
+                <h1>MedAssist</h1>
+            </div>
+            
+            <p class="description">
+                Welcome to MedAssist, your AI-powered medical assistant. Ask any health-related questions and receive information based on medical knowledge.
+            </p>
+            
+            <div class="info-card">
+                <h3>How It Works</h3>
+                <p>MedAssist uses advanced T5 transformer technology to understand and respond to your medical queries with relevant information.</p>
+            </div>
+            
+            <div class="info-card">
+                <h3>Get the Most from MedAssist</h3>
+                <p>For best results, be specific with your symptoms or questions. Include relevant details like duration, severity, and any related conditions.</p>
+            </div>
+            
+            <p class="disclaimer">
+                <strong>Important:</strong> MedAssist provides information only. It is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified health provider.
+            </p>
+        </div>
+        
+        <div class="main-content">
+            <div class="chat-header">
+                <span class="chat-title">
+                    <svg class="medical-icon" width="16" height="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 16H6c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h12c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1zm-7-2h2v-3h3V9h-3V6h-2v3H7v2h3z" fill="#0071e3"/>
+                    </svg>
+                    Medical Consultation
+                </span>
+                <div class="chat-status">
+                    <div class="status-dot"></div>
+                    Online
+                </div>
+            </div>
+            
+            <div class="chat-container" id="chat-container">
+                <div class="messages-container" id="messages-container">
+                    <div class="message bot-message">
+                        <div class="message-header">MedAssist</div>
+                        <div class="message-content">
+                            Hello, I'm MedAssist, your AI-powered medical assistant. How can I help you with your health concerns today?
+                        </div>
+                    </div>
+                </div>
+                <div class="loading-indicator" id="loading-indicator">
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="input-container">
+                <input type="text" id="message-input" placeholder="Type your medical question..." autofocus>
+                <button id="send-button">Send</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const messagesContainer = document.getElementById('messages-container');
+            const chatContainer = document.getElementById('chat-container');
+            const messageInput = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            
+            // API URL - Change this to your deployed API or keep localhost for testing
+            // For local testing:
+            const API_URL = 'http://localhost:8000/chat';
+            
+            // For production (uncomment when ready):
+            // const API_URL = 'https://your-render-app.onrender.com/chat';
+            
+            function scrollToBottom() {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            // Initial scroll to bottom
+            scrollToBottom();
+            
+            function addMessage(message, isUser) {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('message');
+                messageElement.classList.add(isUser ? 'user-message' : 'bot-message');
+                
+                const headerElement = document.createElement('div');
+                headerElement.classList.add('message-header');
+                headerElement.textContent = isUser ? 'You' : 'MedAssist';
+                
+                const contentElement = document.createElement('div');
+                contentElement.classList.add('message-content');
+                contentElement.textContent = message;
+                
+                messageElement.appendChild(headerElement);
+                messageElement.appendChild(contentElement);
+                messagesContainer.appendChild(messageElement);
+                
+                // Scroll to the bottom of the chat container
+                scrollToBottom();
+            }
+            
+            async function sendMessage() {
+                const message = messageInput.value.trim();
+                if (!message) return;
+                
+                // Add user message to chat
+                addMessage(message, true);
+                
+                // Clear input field
+                messageInput.value = '';
+                
+                // Show loading indicator
+                loadingIndicator.style.display = 'block';
+                scrollToBottom();
+                
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ message: message })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Hide loading indicator
+                    loadingIndicator.style.display = 'none';
+                    
+                    // Add bot response to chat
+                    addMessage(data.response, false);
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    loadingIndicator.style.display = 'none';
+                    addMessage('Sorry, I encountered an error processing your request. Please try again later.', false);
+                }
+            }
+            
+            // Send message when button is clicked
+            sendButton.addEventListener('click', sendMessage);
+            
+            // Send message when Enter key is pressed
+            messageInput.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
