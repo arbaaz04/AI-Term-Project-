@@ -2,6 +2,8 @@
 
 This project is a complete medical chatbot built using a fine-tuned T5 transformer model. The chatbot assists users with medical queries by generating responses based on our custom-trained FLAN-T5 model. The project includes a FastAPI backend and a modern HTML frontend interface.
 
+![Frontend](FrontEnd.png)
+
 ## Project Overview
 
 This is an updated and improved version of our previous medical chatbot project. We initially built a chatbot using NLTK and spaCy libraries (available at: https://github.com/arbaaz04/AI-Project-NextBot), but switched to this transformer-based approach as the previous implementation was outdated and not scalable for modern applications.
