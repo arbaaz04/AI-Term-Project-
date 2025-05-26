@@ -73,14 +73,17 @@ This is an updated and improved version of our previous medical chatbot project.
 
 ## Project Structure
 ```
-AI-project-new/
+AI-Term-Project-/
 ├── app/
 │   └── main.py                 # FastAPI backend with T5 model
 ├── static/
-│   └── index.html             # Frontend interface
-├── flan-t5-base-medical-chatbot-finetuned/  # Fine-tuned model files
-├── requirements.txt           # Python dependencies
-└── README.md                 # Project documentation
+│   └── index.html  
+├── trained_models/
+│   └── flan-t5-base-medical-chatbot-finetuned/ 
+├── requirements.txt             # Python dependencies
+├── training_requirements.txt    # Python dependencies for training
+├── training_script.py           # Python training script
+└── README.md                   
 ```
 
 ## Technical Details
