@@ -35,7 +35,7 @@ This is an updated and improved version of our previous medical chatbot project.
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd AI-project-new
+   cd AI-Term-Project-
    ```
 
 2. Create and activate virtual environment:
@@ -47,7 +47,6 @@ This is an updated and improved version of our previous medical chatbot project.
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
-   pip install sentencepiece  # Required for T5 tokenizer
    ```
 
 4. Start the FastAPI server:
@@ -55,7 +54,22 @@ This is an updated and improved version of our previous medical chatbot project.
    uvicorn app.main:app --reload
    ```
 
+   Keep in mind that it will download the 1GB model file from Google Drive.
+
 5. Access the application at `http://127.0.0.1:8000`
+
+## How to train the model
+
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd AI-Term-Project-
+   ```
+2. Install dependencies:
+   ```bash
+   pip install -r training_requirements.txt
+   ```
+3. Run the training_script.py file. It will download the preprocesed data from Google Drive and start training.
 
 ## Project Structure
 ```
@@ -72,7 +86,7 @@ AI-project-new/
 ## Technical Details
 
 ### Model Information
-- **Base Model**: FLAN-T5 Base (220M parameters)
+- **Base Model**: Google FLAN-T5 Base
 - **Fine-tuning**: Custom medical dataset training via Google Colab
 - **Tokenizer**: T5Tokenizer with SentencePiece
 - **Generation**: Sampling-based generation with temperature=0.9

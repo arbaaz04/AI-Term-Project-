@@ -3,12 +3,11 @@ import re
 import os
 from datasets import Dataset, DatasetDict
 from transformers import (
-    T5Tokenizer,                   
-    T5ForConditionalGeneration,      
+    T5Tokenizer,
+    T5ForConditionalGeneration,
     DataCollatorForSeq2Seq,
     Seq2SeqTrainingArguments,
     Seq2SeqTrainer,
-    EarlyStoppingCallback         
 )
 import torch
 import numpy as np
@@ -17,40 +16,56 @@ import evaluate
 import shutil
 import math
 import wandb
-wandb.login()
+import gdown
 
-# --- 0. Mount Google Drive and Define Paths ---
-print("--- Mounting Google Drive ---")
+
+# --- 0. Define Paths (Colab or Local) ---
+print("--- Setting up Project Paths ---")
+IS_COLAB = False
 try:
     from google.colab import drive
     drive.mount('/content/drive', force_remount=True)
-    DRIVE_PROJECT_BASE_PATH = "/content/drive/MyDrive/ColabNotebooks/MedicalChatbotProject"
-    print(f"Google Drive mounted. Project base path: {DRIVE_PROJECT_BASE_PATH}")
+    PROJECT_BASE_PATH_ON_DRIVE = "/content/drive/MyDrive/ColabNotebooks/MedicalChatbotProject"
+    PROJECT_BASE_PATH = PROJECT_BASE_PATH_ON_DRIVE
+    IS_COLAB = True
+    print(f"Running in Google Colab. Google Drive mounted.")
+    print(f"Project base path on Drive: {PROJECT_BASE_PATH}")
+    if not os.path.exists(PROJECT_BASE_PATH):
+        os.makedirs(PROJECT_BASE_PATH)
+        print(f"Created project base directory on Drive: {PROJECT_BASE_PATH}")
 except ImportError:
-    print("Not running in Google Colab. ")
-    DRIVE_PROJECT_BASE_PATH = "."
+    PROJECT_BASE_PATH = "."
+    PROJECT_BASE_PATH = os.path.abspath(PROJECT_BASE_PATH)
+    print(f"Not running in Google Colab. Assuming local execution.")
+    print(f"Project base path (local): {os.path.abspath(PROJECT_BASE_PATH)}")
 
-if not os.path.exists(DRIVE_PROJECT_BASE_PATH):
-    os.makedirs(DRIVE_PROJECT_BASE_PATH)
+PROCESSED_DATA_DIR = os.path.join(PROJECT_BASE_PATH, "processed_data")
+MODEL_CHECKPOINT_HF_ID = "google/flan-t5-base"
+MODEL_OUTPUT_NAME = f"{MODEL_CHECKPOINT_HF_ID.split('/')[-1]}-medical-chatbot-finetuned"
 
-PROCESSED_DATA_DIR = os.path.join(DRIVE_PROJECT_BASE_PATH, "processed_data")
-MODEL_CHECKPOINT = "google/flan-t5-base"
-MODEL_OUTPUT_NAME = f"{MODEL_CHECKPOINT.split('/')[-1]}-medical-chatbot-finetuned"
+CHECKPOINT_DIR = os.path.join(PROJECT_BASE_PATH, "training_checkpoints", MODEL_OUTPUT_NAME)
+MODEL_SAVE_DIR = os.path.join(PROJECT_BASE_PATH, "trained_models", MODEL_OUTPUT_NAME)
 
-DRIVE_CHECKPOINT_PATH = os.path.join(DRIVE_PROJECT_BASE_PATH, "training_checkpoints", MODEL_OUTPUT_NAME)
-FINAL_MODEL_SAVE_PATH = os.path.join(DRIVE_PROJECT_BASE_PATH, "trained_models", MODEL_OUTPUT_NAME)
+if not os.path.exists(PROCESSED_DATA_DIR):
+    os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
+    print(f"Created directory for processed data: {PROCESSED_DATA_DIR}")
 
-if not os.path.exists(DRIVE_CHECKPOINT_PATH):
-    os.makedirs(DRIVE_CHECKPOINT_PATH)
-    print(f"Created Drive checkpoint directory: {DRIVE_CHECKPOINT_PATH}")
-if not os.path.exists(os.path.dirname(FINAL_MODEL_SAVE_PATH)):
-    os.makedirs(os.path.dirname(FINAL_MODEL_SAVE_PATH))
-    print(f"Created Drive final model directory: {os.path.dirname(FINAL_MODEL_SAVE_PATH)}")
+if not os.path.exists(CHECKPOINT_DIR):
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    print(f"Created directory for training checkpoints: {CHECKPOINT_DIR}")
+
+final_model_parent_dir = os.path.dirname(MODEL_SAVE_DIR)
+if not os.path.exists(final_model_parent_dir):
+    os.makedirs(final_model_parent_dir, exist_ok=True)
+    print(f"Created parent directory for final saved models: {final_model_parent_dir}")
+
+print(f"\n--- Path Configuration Summary ---")
+print(f"Processed data will be read from: {PROCESSED_DATA_DIR}")
+print(f"Training checkpoints will be saved to: {CHECKPOINT_DIR}")
+print(f"Final model will be saved to: {MODEL_SAVE_DIR}")
+
 
 print("\n--- Downloading NLTK Punkt Tokenizer ---")
-nltk.download('punkt', quiet=True)
-nltk.download('punkt_tab', quiet=True)
-
 try:
     nltk.data.find('tokenizers/punkt')
     print("NLTK 'punkt' tokenizer already available.")
@@ -60,25 +75,46 @@ except LookupError:
     print("'punkt' downloaded.")
 except Exception as e:
     print(f"An unexpected error occurred during NLTK punkt check/download: {e}")
+try:
+    nltk.data.find('tokenizers/punkt_tab.zip')
+except LookupError:
+    nltk.download('punkt_tab', quiet=True)
 
 # --- Configuration ---
-
 MAX_INPUT_LENGTH = 512
 MAX_TARGET_LENGTH = 512
 PREFIX = "Query: "
 PER_DEVICE_TRAIN_BATCH_SIZE = 4
 PER_DEVICE_EVAL_BATCH_SIZE = 4
 LEARNING_RATE = 3e-5
-NUM_TRAIN_EPOCHS = 3 
+NUM_TRAIN_EPOCHS = 5
 WEIGHT_DECAY = 0.01
-FP16 = False 
-CHECKPOINTS_PER_EPOCH = 3 
-DATA_FRACTION = 0.25
+FP16 = False
+CHECKPOINTS_PER_EPOCH = 3
+DATA_FRACTION = 1.0
 RANDOM_SEED_SUBSAMPLING = 42
-EARLY_STOPPING_PATIENCE = 3 
-EARLY_STOPPING_THRESHOLD = 0.001 
+EARLY_STOPPING_PATIENCE = 3
+EARLY_STOPPING_THRESHOLD = 0.001
 
 # --- 1. Load Dataset Manually ---
+
+# First we have to download the dataset.
+drive_file_ids = {
+    "train.jsonl":      "1h2wOddptmAHK8RUgISTtJygM7j9-4CSf", 
+    "validation.jsonl": "14laT1uL4QCWWtXqQYLvNdmDAU9ww4IVA",
+    "test.jsonl":       "1NpaRf08kZIUJknqnKTQ0kw9rmEiHiA1L",
+}
+
+for filename, file_id in drive_file_ids.items():
+    destination_path = os.path.join(PROCESSED_DATA_DIR, filename)
+
+    if not os.path.exists(destination_path):
+        url = f"https://drive.google.com/uc?id={file_id}"
+        print(f"Downloading {filename} from {url} ...")
+        gdown.download(url, output=destination_path, quiet=False)
+    else:
+        print(f"{filename} already exists at: {destination_path}")
+
 print("\n--- Manually Loading Data and Creating Dataset Objects ---")
 def load_jsonl_to_list(file_path):
     data = []
@@ -90,7 +126,6 @@ def load_jsonl_to_list(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             for i, line in enumerate(f):
                 try:
-                    # Ensure Patient and Doctor fields exist and are not None
                     item = json.loads(line)
                     if "Patient" in item and "Doctor" in item and \
                        item["Patient"] is not None and item["Doctor"] is not None:
@@ -112,7 +147,7 @@ train_data_list_full = load_jsonl_to_list(train_file_path)
 validation_data_list_full = load_jsonl_to_list(validation_file_path)
 
 if train_data_list_full is None or validation_data_list_full is None:
-    raise ValueError("Failed to load one or more dataset files. Check paths and previous error messages.")
+    raise ValueError("Failed to load one or more dataset files. Check paths and previous error messages. For local runs, ensure data is in the 'processed_data' directory.")
 if not train_data_list_full:
     raise ValueError("Training data is empty after loading. Check train.jsonl file content and path.")
 
@@ -150,8 +185,6 @@ print(f"Final validation dataset size for training: {len(raw_datasets['validatio
 if len(raw_datasets['train']) == 0:
     raise ValueError("Training dataset is empty after subsampling. Check DATA_FRACTION and original dataset size.")
 
-
-# --- Calculate EVAL_SAVE_LOGGING_STEPS ---
 print("\n--- Calculating Steps for Periodic Saving/Evaluation/Logging ---")
 num_train_samples = len(raw_datasets['train'])
 if torch.cuda.is_available():
@@ -160,7 +193,6 @@ else:
     num_gpus = 1
 print(f"  Number of GPUs to be used by Trainer (estimated): {num_gpus}")
 
-# Note: No GRADIENT_ACCUMULATION_STEPS in this version for simplicity, add if needed
 samples_processed_per_optimizer_step = PER_DEVICE_TRAIN_BATCH_SIZE * num_gpus
 if samples_processed_per_optimizer_step == 0:
     raise ValueError("samples_processed_per_optimizer_step is zero.")
@@ -169,17 +201,14 @@ if num_train_samples == 0: optimizer_steps_per_epoch = 0
 else: optimizer_steps_per_epoch = math.ceil(num_train_samples / samples_processed_per_optimizer_step)
 
 if optimizer_steps_per_epoch == 0:
-    print(f"  Warning: optimizer_steps_per_epoch is 0. Setting EVAL_SAVE_LOGGING_STEPS to 1.")
     EVAL_SAVE_LOGGING_STEPS = 1
 elif CHECKPOINTS_PER_EPOCH <= 0:
-    print(f"  Warning: CHECKPOINTS_PER_EPOCH ({CHECKPOINTS_PER_EPOCH}) is not positive. Defaulting to once per epoch.")
     EVAL_SAVE_LOGGING_STEPS = optimizer_steps_per_epoch if optimizer_steps_per_epoch > 0 else 1
 elif optimizer_steps_per_epoch < CHECKPOINTS_PER_EPOCH:
-    print(f"  Warning: optimizer_steps_per_epoch ({optimizer_steps_per_epoch}) < CHECKPOINTS_PER_EPOCH ({CHECKPOINTS_PER_EPOCH}). Will save/eval/log every step.")
     EVAL_SAVE_LOGGING_STEPS = 1
 else:
     EVAL_SAVE_LOGGING_STEPS = optimizer_steps_per_epoch // CHECKPOINTS_PER_EPOCH
-    EVAL_SAVE_LOGGING_STEPS = max(1, EVAL_SAVE_LOGGING_STEPS)
+EVAL_SAVE_LOGGING_STEPS = max(1, EVAL_SAVE_LOGGING_STEPS) # Ensure it's at least 1
 
 print(f"  Number of training samples (after subsampling): {num_train_samples}")
 print(f"  Optimizer steps per epoch: {optimizer_steps_per_epoch}")
@@ -188,132 +217,93 @@ print(f"  => EVAL_SAVE_LOGGING_STEPS set to: {EVAL_SAVE_LOGGING_STEPS}")
 
 # --- 2. Initialize Tokenizer ---
 print("\n--- Initializing T5 Tokenizer ---")
-tokenizer = T5Tokenizer.from_pretrained(MODEL_CHECKPOINT)
+tokenizer = T5Tokenizer.from_pretrained(MODEL_CHECKPOINT_HF_ID)
 
 # --- 3. Preprocess Data ---
 print("\n--- Preprocessing Data for T5 ---")
 def preprocess_function_t5(examples):
-    # Ensure "Patient" and "Doctor" fields are used, and handle None values safely.
     inputs_text = [PREFIX + str(patient_query) if patient_query is not None else PREFIX for patient_query in examples["Patient"]]
     targets_text = [str(doctor_answer) if doctor_answer is not None else "" for doctor_answer in examples["Doctor"]]
-
-    model_inputs = tokenizer(
-        inputs_text,
-        max_length=MAX_INPUT_LENGTH,
-        truncation=True,
-        padding="max_length"
-    )
-
-    labels = tokenizer(
-        text_target=targets_text,
-        max_length=MAX_TARGET_LENGTH,
-        truncation=True,
-        padding="max_length"
-    )["input_ids"]
-
-    processed_labels = []
-    for label_ids in labels:
-        processed_labels.append([token_id if token_id != tokenizer.pad_token_id else -100 for token_id in label_ids])
-
-    model_inputs["labels"] = processed_labels
+    model_inputs = tokenizer(inputs_text, max_length=MAX_INPUT_LENGTH, truncation=True, padding="max_length")
+    labels = tokenizer(text_target=targets_text, max_length=MAX_TARGET_LENGTH, truncation=True, padding="max_length")["input_ids"]
+    model_inputs["labels"] = [[token_id if token_id != tokenizer.pad_token_id else -100 for token_id in label_ids] for label_ids in labels]
     return model_inputs
 
-
-# Tokenize datasets
 if len(raw_datasets['train']) > 0:
-    tokenized_train = raw_datasets['train'].map(
-        preprocess_function_t5,
-        batched=True,
-        remove_columns=raw_datasets["train"].column_names,
-        desc="Tokenizing T5 train dataset"
-    )
+    tokenized_train = raw_datasets['train'].map(preprocess_function_t5, batched=True, remove_columns=raw_datasets["train"].column_names, desc="Tokenizing T5 train dataset")
 else:
-    # Handle empty train set - create empty tokenized set with expected features
     from datasets import Features, Value, Sequence
-    # T5 typical tokenized output features: 'input_ids', 'attention_mask', 'labels'
-    t5_features = Features({
-        'input_ids': Sequence(feature=Value(dtype='int32')),
-        'attention_mask': Sequence(feature=Value(dtype='int8')),
-        'labels': Sequence(feature=Value(dtype='int64')) # labels are int64
-    })
+    t5_features = Features({'input_ids': Sequence(Value(dtype='int32')), 'attention_mask': Sequence(Value(dtype='int8')), 'labels': Sequence(Value(dtype='int64'))})
     tokenized_train = Dataset.from_dict({k: [] for k in t5_features.keys()}, features=t5_features)
     print("Training dataset is empty, created an empty tokenized train dataset.")
 
-
 if len(raw_datasets['validation']) > 0:
-    tokenized_validation = raw_datasets['validation'].map(
-        preprocess_function_t5,
-        batched=True,
-        remove_columns=raw_datasets["validation"].column_names,
-        desc="Tokenizing T5 validation dataset"
-    )
+    tokenized_validation = raw_datasets['validation'].map(preprocess_function_t5, batched=True, remove_columns=raw_datasets["validation"].column_names, desc="Tokenizing T5 validation dataset")
 else:
-    tokenized_validation = Dataset.from_dict({k: [] for k in tokenized_train.features.keys()}, features=tokenized_train.features)
+    features_to_use = tokenized_train.features if len(tokenized_train.features) > 0 else Features({'input_ids': Sequence(Value(dtype='int32')), 'attention_mask': Sequence(Value(dtype='int8')), 'labels': Sequence(Value(dtype='int64'))})
+    tokenized_validation = Dataset.from_dict({k: [] for k in features_to_use.keys()}, features=features_to_use)
     print("Validation dataset is empty, created an empty tokenized validation dataset.")
 
-
-tokenized_datasets = DatasetDict({
-    'train': tokenized_train,
-    'validation': tokenized_validation
-})
+tokenized_datasets = DatasetDict({'train': tokenized_train, 'validation': tokenized_validation})
 print(f"Tokenized dataset features: {tokenized_datasets['train'].features if len(tokenized_datasets['train']) > 0 else 'Train dataset is empty'}")
 
-print("--- Inspecting a sample from tokenized_train ---")
 if len(tokenized_datasets['train']) > 0:
-    sample = tokenized_datasets['train'][0]
-    print("Sample input_ids:", sample['input_ids'])
-    print("Sample labels:", sample['labels'])
-    print("Are all labels -100?", all(l == -100 for l in sample['labels']))
-
-    # Check a few more
-    num_all_minus_100 = 0
-    num_non_empty_targets_initial = 0
-    for i in range(min(10, len(raw_datasets['train']))): # Check raw data
-        if raw_datasets['train'][i]['Doctor'] and raw_datasets['train'][i]['Doctor'].strip():
-            num_non_empty_targets_initial +=1
-
-    for i in range(min(100, len(tokenized_datasets['train']))):
-        if all(l == -100 for l in tokenized_datasets['train'][i]['labels']):
-            num_all_minus_100 += 1
-    print(f"Number of initial raw 'Doctor' fields non-empty (first 10): {num_non_empty_targets_initial}")
-    print(f"Out of the first {min(100, len(tokenized_datasets['train']))} tokenized samples, {num_all_minus_100} have all labels as -100.")
-
-    has_any_valid_label_token = False
-    for ex in tokenized_datasets['train']:
-        if any(l != -100 for l in ex['labels']):
-            has_any_valid_label_token = True
-            break
-    if not has_any_valid_label_token:
-        print("CRITICAL: NO tokenized training example has any valid label token (all are -100 or sequences producing all -100s)!")
-    else:
-        print("At least one training example has valid label tokens.")
-
+    has_any_valid_label_token = any(any(l != -100 for l in ex['labels']) for ex in tokenized_datasets['train'])
+    if not has_any_valid_label_token: print("CRITICAL: NO tokenized training example has any valid label token!")
+    else: print("At least one training example has valid label tokens.")
 else:
     print("Tokenized training dataset is empty.")
 
 # --- 4. Load Model ---
 print("\n--- Loading Pre-trained T5 Model ---")
-# Explicitly use T5ForConditionalGeneration
-model = T5ForConditionalGeneration.from_pretrained(MODEL_CHECKPOINT)
+model = T5ForConditionalGeneration.from_pretrained(MODEL_CHECKPOINT_HF_ID)
 
 # --- 5. Training Arguments ---
 print("\n--- Defining Training Arguments for T5 ---")
+
+# --- Weights & Biases Configuration (User Prompt) ---
+USE_WANDB_USER_CHOICE = False
+while True:
+    user_choice = input("Do you want to use Weights & Biases for logging? (yes/no): ").strip().lower()
+    if user_choice in ['yes', 'y']:
+        USE_WANDB_USER_CHOICE = True
+        break
+    elif user_choice in ['no', 'n']:
+        USE_WANDB_USER_CHOICE = False
+        break
+    else:
+        print("Invalid input. Please enter 'yes' or 'no'.")
+
+WANDB_PROJECT_NAME = "medical-chatbot-t5-finetuning"
+WANDB_RUN_NAME = f"{MODEL_OUTPUT_NAME}-epochs_{NUM_TRAIN_EPOCHS}-lr_{LEARNING_RATE}-bs_{PER_DEVICE_TRAIN_BATCH_SIZE*num_gpus}-data_{DATA_FRACTION*100:.0f}pct_seed{RANDOM_SEED_SUBSAMPLING}"
+effective_report_to = []
+wandb_active_for_run = False
+
+if USE_WANDB_USER_CHOICE:
+    if os.getenv("WANDB_DISABLED") == "true":
+        print("Weights & Biases is globally disabled via WANDB_DISABLED environment variable. User choice for W&B will be ignored.")
+    else:
+        try:
+            wandb.login() # Attempt login. Might be interactive if not configured.
+            os.environ["WANDB_PROJECT"] = WANDB_PROJECT_NAME
+            print(f"Weights & Biases enabled by user. Project: {WANDB_PROJECT_NAME}, Run: {WANDB_RUN_NAME}")
+            effective_report_to.append("wandb")
+            wandb_active_for_run = True
+        except Exception as e:
+            print(f"W&B login/configuration failed: {e}. Disabling W&B for this run.")
+            os.environ["WANDB_DISABLED"] = "true" # Ensure disabled if setup fails
+else:
+    print("Weights & Biases logging disabled by user choice.")
+    os.environ["WANDB_DISABLED"] = "true" # Explicitly disable if user chooses no
+
+
 save_limit = (CHECKPOINTS_PER_EPOCH * NUM_TRAIN_EPOCHS) + 2
 save_limit = max(2, save_limit)
 
-# W&B Configuration
-WANDB_PROJECT_NAME = "medical-chatbot-t5-finetuning" 
-WANDB_RUN_NAME = f"{MODEL_OUTPUT_NAME}-epochs_{NUM_TRAIN_EPOCHS}-lr_{LEARNING_RATE}-bs_{PER_DEVICE_TRAIN_BATCH_SIZE}-data_{DATA_FRACTION*100:.0f}pct"
-if not os.getenv("WANDB_DISABLED"): 
-    os.environ["WANDB_PROJECT"] = WANDB_PROJECT_NAME
-    print(f"Weights & Biases configured. Project: {WANDB_PROJECT_NAME}, Run: {WANDB_RUN_NAME}")
-else:
-    print("Weights & Biases is disabled via WANDB_DISABLED environment variable.")
-
 training_args = Seq2SeqTrainingArguments(
-    output_dir=DRIVE_CHECKPOINT_PATH,
+    output_dir=CHECKPOINT_DIR,
     eval_strategy="steps" if len(tokenized_datasets['validation']) > 0 else "no",
-    eval_steps=EVAL_SAVE_LOGGING_STEPS if len(tokenized_datasets['validation']) > 0 and EVAL_SAVE_LOGGING_STEPS > 0 else None, # ensure eval_steps > 0
+    eval_steps=EVAL_SAVE_LOGGING_STEPS if len(tokenized_datasets['validation']) > 0 and EVAL_SAVE_LOGGING_STEPS > 0 else None,
     learning_rate=LEARNING_RATE,
     per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
     per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
@@ -323,13 +313,13 @@ training_args = Seq2SeqTrainingArguments(
     predict_with_generate=True if len(tokenized_datasets['validation']) > 0 else False,
     fp16=FP16,
     logging_strategy="steps",
-    logging_steps=EVAL_SAVE_LOGGING_STEPS if EVAL_SAVE_LOGGING_STEPS > 0 else 10, # ensure logging_steps > 0
+    logging_steps=EVAL_SAVE_LOGGING_STEPS if EVAL_SAVE_LOGGING_STEPS > 0 else 10,
     save_strategy="steps",
-    save_steps=EVAL_SAVE_LOGGING_STEPS if EVAL_SAVE_LOGGING_STEPS > 0 else 500, # ensure save_steps > 0
+    save_steps=EVAL_SAVE_LOGGING_STEPS if EVAL_SAVE_LOGGING_STEPS > 0 else 500,
     load_best_model_at_end=True if len(tokenized_datasets['validation']) > 0 else False,
-    metric_for_best_model="eval_loss" if len(tokenized_datasets['validation']) > 0 else None, # Default to eval_loss
-    report_to="wandb",
-    run_name=WANDB_RUN_NAME
+    metric_for_best_model="eval_loss" if len(tokenized_datasets['validation']) > 0 else None,
+    report_to=effective_report_to if effective_report_to else None,
+    run_name=WANDB_RUN_NAME if wandb_active_for_run else None,
 )
 print(f"Training arguments: FP16 set to {training_args.fp16}")
 if len(tokenized_datasets['validation']) == 0:
@@ -338,7 +328,6 @@ if len(tokenized_datasets['validation']) == 0:
 
 # --- 6. Data Collator ---
 print("\n--- Initializing Data Collator for Seq2Seq ---")
-# DataCollatorForSeq2Seq works for T5 as well.
 data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
 
 # --- 7. Evaluation Metrics (ROUGE for T5) ---
@@ -347,50 +336,29 @@ rouge_metric = evaluate.load("rouge")
 
 def compute_metrics_t5(eval_preds):
     preds, labels = eval_preds
-    if isinstance(preds, tuple):
-        preds = preds[0]
+    if isinstance(preds, tuple): preds = preds[0]
+    if torch.is_tensor(preds): preds_np = preds.cpu().numpy()
+    else: preds_np = np.array(preds)
 
-    if torch.is_tensor(preds):
-        preds_np = preds.cpu().numpy()
-    else:
-        preds_np = np.array(preds)
-
-    # Clean preds: replace negative values or values outside vocab with pad_token_id
     vocab_size = tokenizer.vocab_size
-    cleaned_preds = np.where(preds_np < 0, tokenizer.pad_token_id, preds_np)
-    cleaned_preds = np.where(cleaned_preds >= vocab_size, tokenizer.pad_token_id, cleaned_preds)
-    cleaned_preds = cleaned_preds.astype(np.int32) # Ensure correct int type for tokenizer
-
+    cleaned_preds = np.where((preds_np < 0) | (preds_np >= vocab_size), tokenizer.pad_token_id, preds_np).astype(np.int32)
     decoded_preds = tokenizer.batch_decode(cleaned_preds, skip_special_tokens=True)
 
-    # Replace -100 in labels with pad_token_id for decoding
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-    # ROUGE expects newlines for segment separation (for ROUGE-L)
     decoded_preds = ["\n".join(nltk.sent_tokenize(pred.strip())) for pred in decoded_preds]
     decoded_labels = ["\n".join(nltk.sent_tokenize(label.strip())) for label in decoded_labels]
 
     result = rouge_metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
-    result = {key: value * 100 for key, value in result.items()} # Use F-measure for ROUGE
-
-    # Add gen_len
+    result = {key: value * 100 for key, value in result.items()}
     prediction_lens = [np.count_nonzero(p_seq != tokenizer.pad_token_id) for p_seq in cleaned_preds]
     result["gen_len"] = np.mean(prediction_lens)
 
-    # Ensure results are JSON serializable
-    final_result = {}
-    for k, v_val in result.items(): # Renamed v to v_val to avoid conflict
-        if isinstance(v_val, np.generic):
-            final_result[k] = v_val.item()
-        else:
-            final_result[k] = v_val
-        final_result[k] = round(final_result[k], 4)
-    return final_result
+    return {k: round(v.item() if isinstance(v, np.generic) else v, 4) for k, v in result.items()}
 
 # --- 8. Initialize Trainer ---
 print("\n--- Initializing Seq2SeqTrainer for T5 ---")
-
 trainer = Seq2SeqTrainer(
     model=model,
     args=training_args,
@@ -407,34 +375,34 @@ try:
     if len(tokenized_datasets['train']) == 0:
         print("Training dataset is empty. Skipping training.")
     else:
-        # Check if resuming from a checkpoint
         last_checkpoint = None
-        if os.path.isdir(training_args.output_dir) and training_args.load_best_model_at_end is False : # only resume if not loading best at end from scratch
-            if any("checkpoint" in d for d in os.listdir(training_args.output_dir)):
-                 print(f"Resuming training from checkpoints in {training_args.output_dir}")
-                 last_checkpoint = True # Just a flag for the train call
+        if os.path.isdir(training_args.output_dir) and any("checkpoint" in d for d in os.listdir(training_args.output_dir)):
+             print(f"Checkpoints found in {training_args.output_dir}. Trainer will attempt to resume if applicable.")
+             last_checkpoint = True
 
-        train_result = trainer.train(resume_from_checkpoint=last_checkpoint) # Pass True or path to specific checkpoint
+        train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
         print("\n--- Fine-tuning Complete ---")
 
         metrics = train_result.metrics
-        # Manually add number of epochs trained if not fully trained due to early stopping
         if 'epoch' not in metrics and hasattr(trainer.state, 'epoch'):
             metrics['epoch'] = round(trainer.state.epoch, 2)
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-        print(f"\n--- Saving final best T5 model to Google Drive at: {FINAL_MODEL_SAVE_PATH} ---")
-        if os.path.exists(FINAL_MODEL_SAVE_PATH):
-            print(f"Warning: Destination path {FINAL_MODEL_SAVE_PATH} already exists. Overwriting.")
-            shutil.rmtree(FINAL_MODEL_SAVE_PATH)
-        trainer.save_model(FINAL_MODEL_SAVE_PATH) # Saves the best model if load_best_model_at_end=True
-        print(f"Final best T5 model and tokenizer saved to {FINAL_MODEL_SAVE_PATH}")
+        print(f"\n--- Saving final best T5 model to: {MODEL_SAVE_DIR} ---")
+        if os.path.exists(MODEL_SAVE_DIR):
+            print(f"Warning: Destination path {MODEL_SAVE_DIR} already exists. Overwriting.")
+            shutil.rmtree(MODEL_SAVE_DIR)
+        trainer.save_model(MODEL_SAVE_DIR)
+        print(f"Final best T5 model and tokenizer saved to {MODEL_SAVE_DIR}")
 
         print("\n--- Example T5 Inference (using the final saved model) ---")
         from transformers import pipeline
-        chatbot = pipeline("text2text-generation", model=FINAL_MODEL_SAVE_PATH, tokenizer=FINAL_MODEL_SAVE_PATH, device=0 if torch.cuda.is_available() else -1)
+        device = 0 if torch.cuda.is_available() else -1
+        print(f"Using device {('cuda:0' if device == 0 else 'cpu')} for inference pipeline.")
+        
+        chatbot = pipeline("text2text-generation", model=MODEL_SAVE_DIR, tokenizer=MODEL_SAVE_DIR, device=device)
         test_patient_query = "I have a persistent cough and a slight fever for 3 days. What should I do?"
         formatted_query_for_t5 = PREFIX + test_patient_query
 
@@ -447,4 +415,7 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 finally:
+    if wandb_active_for_run and wandb.run is not None:
+        print("Finishing W&B run.")
+        wandb.finish()
     print("\n--- T5 Training Script Finished ---")

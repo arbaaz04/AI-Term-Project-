@@ -1,0 +1,5 @@
+/venv
+trained_models/flan-t5-base-medical-chatbot-finetuned/MODEL README.txt
+trained_models/flan-t5-base-medical-chatbot-finetuned/model.safetensors
+*.pyc
+/processed_data

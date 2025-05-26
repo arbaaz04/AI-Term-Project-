@@ -1,0 +1,9 @@
+numpy
+nltk
+torch
+transformers
+datasets
+evaluate
+wandb
+rouge_score
+gdown

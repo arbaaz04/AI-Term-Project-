@@ -2,3 +2,5 @@ fastapi
 uvicorn
 transformers
 torch
+gdown
+sentencepiece

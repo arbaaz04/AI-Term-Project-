@@ -7,6 +7,8 @@ import torch
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 import pathlib
 import re
+import gdown
+import os
 
 app = FastAPI()
 
@@ -20,7 +22,16 @@ app.add_middleware(
 ROOT_DIR = pathlib.Path(__file__).parent.parent.absolute()
 app.mount("/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
 
-model_path = str(ROOT_DIR / "flan-t5-base-medical-chatbot-finetuned")
+model_path = str(ROOT_DIR / "trained_models" / "flan-t5-base-medical-chatbot-finetuned")
+file_id = "1NzLDdHLAWUjgQXSz___h0O5eFgzL7nDf"
+safetensors_file_path = model_path  + "\\model.safetensors"
+if not os.path.exists(safetensors_file_path):
+    url = f"https://drive.google.com/uc?id={file_id}"
+    print(f"Downloading from: {url}")
+    gdown.download(url, output=safetensors_file_path, quiet=False)
+else:
+    print(f"Model file already exists at: {safetensors_file_path}")
+
 tokenizer = T5Tokenizer.from_pretrained(model_path)
 model = T5ForConditionalGeneration.from_pretrained(model_path)
 
